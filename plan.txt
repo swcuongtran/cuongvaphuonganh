@@ -1,0 +1,133 @@
+================================================================================
+KẾ HOẠCH TRIỂN KHAI: BỘ SỬA LỖI CHÍNH TẢ & CHUẨN HÓA GÕ PHÍM TIẾNG VIỆT
+(VIETNAMESE SPELL CHECKER & ACCENT RESTORATION WITH N-GRAM MODEL)
+================================================================================
+
+1. MỤC TIÊU DỰ ÁN
+--------------------------------------------------------------------------------
+Nâng cấp hệ thống hiện tại từ "Bộ khôi phục dấu cơ bản" thành "Bộ sửa lỗi gõ phím
+và chuẩn hóa tiếng Việt toàn diện" (tương tự cơ chế của Cốc Cốc, Laban Key, Gboard).
+
+Hệ thống cần giải quyết triệt để 4 nhóm lỗi thực tế:
+  [1] Lỗi gõ dính / sót phím Telex: "tooi" -> "tôi", "ddang" -> "đang", "hocj" -> "học",
+      "nguwoif" -> "người", "vieetj" -> "việt", "dduwowcj" -> "được".
+  [2] Lỗi nhầm lẫn hỏi / ngã: "uống sửa tươi" -> "uống sữa tươi", "sữa xe đạp" -> "sửa xe đạp".
+  [3] Lỗi nhầm lẫn phụ âm tương đồng (ngữ âm phương ngữ):
+      - s <-> x : "chia xe" -> "chia sẻ", "xắp xếp" -> "sắp xếp"
+      - tr <-> ch : "câu truyện" -> "câu chuyện", "chân trọng" -> "trân trọng"
+      - d <-> gi <-> r : "da đình" -> "gia đình", "dành dụm" -> "giành / dành"
+      - l <-> n : "lói năng" -> "nói năng"
+  [4] Gõ lẫn lộn có dấu và không dấu: "hôm nay toi di hoc tai truong dai hoc" ->
+      "hôm nay tôi đi học tại trường đại học".
+
+
+2. KIẾN TRÚC KỸ THUẬT VÀ CÁC MODULE MỚI
+--------------------------------------------------------------------------------
+
+A. MODULE 1: BỘ GIẢI MÃ TELEX (TELEX DECODER / NORMALIZER)
+   - Vị trí: query_processor.py
+   - Chức năng: Chuyển đổi các chuỗi ký tự gõ phím telex thô về âm tiết tiếng Việt chuẩn.
+   - Các quy tắc xử lý:
+     + Ký tự đôi nguyên âm:
+       aa -> â, aw -> ă, ee -> ê, oo -> ô, ow/w -> ơ, uw -> ư
+     + Ký tự phụ âm:
+       dd -> đ
+     + Ký tự thanh điệu telex:
+       s -> sắc, f -> huyền, r -> hỏi, x -> ngã, j -> nặng
+   - Logic: Khi một từ không có trong lexicon gốc (như "tooi", "hocj", "ddang"),
+     thử giải mã qua quy tắc telex để đưa về từ tiếng Việt hợp lệ, sau đó tra cứu
+     lại trong lexicon.
+
+B. MODULE 2: MỞ RỘNG ỨNG VIÊN THEO NGỮ ÂM (PHONETIC CANDIDATE EXPANSION)
+   - Vị trí: NgramLanguageModel.get_candidates() trong query_processor.py
+   - Xây dựng bảng hoán đổi phụ âm dễ nhầm lẫn (PHONETIC_CONFUSION_MAP):
+     + "s"  <---> "x"
+     + "tr" <---> "ch"
+     + "d"  <---> "gi" <---> "r"
+     + "l"  <---> "n"
+   - Cơ chế:
+     + Khi tra cứu ứng viên cho từ w:
+       * Lấy ứng viên chuẩn từ unaccented(w).
+       * Nếu w bắt đầu bằng một trong các phụ âm trên, sinh thêm các biến thể
+         tương ứng và lấy thêm top ứng viên từ lexicon.
+       * Ví dụ: Từ "xe" (gốc "xe") -> sinh thêm biến thể "se" -> bổ sung các
+         từ "sẽ", "sẻ", "sè" vào tập ứng viên.
+       * Nhờ mô hình Trigram/Bigram, cụm "chia sẻ" sẽ có điểm rất cao,
+         giúp tự động sửa "chia xe" thành "chia sẻ".
+
+C. MODULE 3: CƠ CHẾ ĐIỂM ƯU TIÊN VÀ PHẠT (PRIOR & PENALTY SCORING)
+   - Vị trí: NgramLanguageModel.score_ngram() và Beam Search
+   - Trọng số tinh chỉnh:
+     + Bonus từ đã có dấu (Original Accent Bonus):
+       Nếu người dùng gõ từ đã có dấu chính xác (ví dụ "hôm"), cộng thêm điểm thưởng
+       (+1.5 điểm) để ưu tiên giữ nguyên, không đổi sang từ khác trừ khi ngữ cảnh
+       xung quanh quá bất hợp lý.
+     + Penalty biến thể ngữ âm (Phonetic Penalty):
+       Các ứng viên sinh ra từ hoán đổi phụ âm (s/x, tr/ch) bị trừ nhẹ (-1.0 điểm)
+       để tránh việc tự ý sửa từ đúng của người dùng thành từ khác khi không có
+       bằng chứng ngữ cảnh (Bigram/Trigram) rõ ràng.
+
+D. MODULE 4: TỰ ĐỘNG SỬA HỎI / NGÃ BẰNG NGỮ CẢNH (CONTEXTUAL TONE DISAMBIGUATION)
+   - Cả dấu hỏi và dấu ngã khi strip_accents đều đưa về cùng một gốc không dấu.
+   - Ví dụ: "sửa" và "sữa" đều có gốc là "sua".
+   - Trong lexicon, "sua" luôn có cả "sửa" và "sữa" trong danh sách ứng viên.
+   - N-gram Language Model sẽ quyết định dựa trên từ đi kèm:
+     + "uống" + "sua" + "tươi" -> Trigram(uống, sữa, tươi) cực cao -> Chọn "sữa"
+     + "thợ" + "sua" + "xe"    -> Trigram(thợ, sửa, xe) cực cao    -> Chọn "sửa"
+
+
+3. KẾ HOẠCH TRIỂN KHAI THEO TỪNG BƯỚC (ROADMAP)
+--------------------------------------------------------------------------------
+
+GIAI ĐOẠN 1: CẬP NHẬT MODULE QUERY_PROCESSOR.PY
+   [x] Bước 1.1: Viết hàm decode_telex(word) để xử lý các chuỗi gõ phím telex.
+   [x] Bước 1.2: Định nghĩa từ điển hoán đổi ngữ âm PHONETIC_PAIRS.
+   [x] Bước 1.3: Cải tiến hàm get_candidates() tích hợp:
+                 - Giải mã telex
+                 - Mở rộng ứng viên ngữ âm (s/x, tr/ch, d/gi/r, l/n)
+                 - Đánh dấu nguồn gốc ứng viên (gốc, telex, hoán đổi ngữ âm)
+   [x] Bước 1.4: Nâng cấp hàm chấm điểm score_ngram() hỗ trợ điểm ưu tiên
+                 và điểm phạt phù hợp để giữ tính tự nhiên của văn bản.
+
+GIAI ĐOẠN 2: BỔ SUNG BỘ TEST TOÀN DIỆN VÀ BENCHMARK TRONG TEST_QUERY.PY
+   [x] Bước 2.1: Thêm TestTelexCorrection:
+                 - "tooi muon di hoc" -> "tôi muốn đi học"
+                 - "ddang lam vieejc" -> "đang làm việc"
+                 - "nguwoif vietj nam" -> "người việt nam"
+   [x] Bước 2.2: Thêm TestPhoneticConfusion:
+                 - "chia xe kinh nghiem" -> "chia sẻ kinh nghiệm"
+                 - "cau truyen co tich" -> "câu chuyện cổ tích"
+                 - "xap xep lich hen" -> "sắp xếp lịch hẹn"
+   [x] Bước 2.3: Thêm TestToneCorrection (Hỏi/Ngã):
+                 - "uống sửa tươi" -> "uống sữa tươi"
+                 - "sữa xe đạp" -> "sửa xe đạp"
+                 - "nghỉ ngờ chuyện này" -> "nghi ngờ chuyện này"
+   [x] Bước 2.4: Thêm TestMixedAccented:
+                 - "hôm nay toi di hoc tai truong dai hoc" -> "hôm nay tôi đi học tại trường đại học"
+                 - "thoi tiet hôm nay rat dep" -> "thời tiết hôm nay rất đẹp"
+   [x] Bước 2.5: Cập nhật hàm run_benchmark() bổ sung các ca kiểm thử mới và
+                 đo lường độ trễ (Latency) đảm bảo vẫn duy trì < 400ms / câu.
+
+GIAI ĐOẠN 3: KIỂM THỬ VÀ TINH CHỈNH (TUNING & VERIFICATION)
+   [x] Bước 3.1: Chạy toàn bộ test suite và benchmark.
+   [x] Bước 3.2: Kiểm tra các trường hợp biên (Edge cases): số, dấu câu, chữ viết hoa,
+                 từ tiếng Anh không bị sửa sai lệch.
+   [x] Bước 3.3: Báo cáo kết quả chi tiết.
+
+
+4. CÁC CA KIỂM THỬ MẪU (BENCHMARK TEST CASES)
+--------------------------------------------------------------------------------
+1. Lỗi Telex:
+   - "tooi muon ddi hocj"           -> "tôi muốn đi học"
+   - "nguwoif tieengs vietj"        -> "người tiếng việt"
+2. Lỗi Ngữ âm (s/x, tr/ch, d/gi/r):
+   - "chia xe kinh nghiem"          -> "chia sẻ kinh nghiệm"
+   - "cau truyen co tich"           -> "câu chuyện cổ tích"
+   - "xap xep thoi gian"            -> "sắp xếp thời gian"
+3. Lỗi Hỏi/Ngã:
+   - "uống sửa tươi mô châu"        -> "uống sữa tươi mộc châu"
+   - "sữa xe máy ha noi"            -> "sửa xe máy hà nội"
+4. Gõ lẫn lộn dấu:
+   - "hôm nay toi di hoc"           -> "hôm nay tôi đi học"
+   - "đại học bach khoa hà nội"     -> "đại học bách khoa hà nội"
+================================================================================

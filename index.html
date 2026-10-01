@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnamese Spell Checker & N-Gram API</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0e17;
+            --panel-bg: rgba(17, 24, 39, 0.75);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --accent-emerald: #10b981;
+            --accent-cyan: #06b6d4;
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(16, 185, 129, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.12) 0px, transparent 50%);
+        }
+
+        .container { width: 100%; max-width: 860px; }
+
+        .header { text-align: center; margin-bottom: 32px; }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .badge .dot { width: 6px; height: 6px; background: #34d399; border-radius: 50%; box-shadow: 0 0 8px #34d399; }
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 40%, var(--accent-cyan) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .subtitle { color: var(--text-secondary); font-size: 0.95rem; }
+
+        .card {
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 14px;
+            color: #fff;
+            font-size: 1rem;
+            font-family: inherit;
+            resize: vertical;
+            outline: none;
+            transition: all 0.2s;
+        }
+        textarea:focus {
+            border-color: var(--accent-emerald);
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 14px;
+            align-items: center;
+        }
+        button {
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-emerald), #059669);
+            color: white;
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+        }
+        .btn-primary:hover { opacity: 0.95; transform: translateY(-1px); }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); }
+
+        .chips-container {
+            margin-top: 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .chips-label { font-size: 0.8rem; color: var(--text-muted); }
+        .chip {
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 4px 10px;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            transition: all 0.15s;
+        }
+        .chip:hover {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.4);
+            color: #fff;
+        }
+
+        .result-box {
+            display: none;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 20px;
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .result-title { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; }
+        .latency-pill {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: #34d399;
+            background: rgba(16, 185, 129, 0.1);
+            padding: 2px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .result-content {
+            font-size: 1.15rem;
+            font-weight: 500;
+            color: #fff;
+            line-height: 1.5;
+        }
+
+        .suggestions-list {
+            list-style: none;
+            margin-top: 10px;
+        }
+        .suggestions-list li {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            margin-bottom: 6px;
+            font-size: 0.95rem;
+        }
+        .suggestions-list .score {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent-cyan);
+            font-size: 0.8rem;
+        }
+
+        .api-docs {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            font-size: 0.85rem;
+        }
+        .api-docs h3 { font-size: 0.9rem; margin-bottom: 10px; color: var(--text-secondary); }
+        pre {
+            background: #05070a;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: #38bdf8;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="badge"><span class="dot"></span> C# .NET 10 Minimal API</div>
+            <h1>Vietnamese Spell Checker & N-Gram API</h1>
+            <p class="subtitle">Khôi phục dấu, sửa lỗi Telex, chuẩn hóa chính tả và bảo vệ từ viết tắt thời gian thực</p>
+        </div>
+
+        <div class="card">
+            <div class="input-group">
+                <label for="inputQuery">Câu truy vấn tiếng Việt cần xử lý:</label>
+                <textarea id="inputQuery" placeholder="Nhập câu lỗi telex, không dấu, hoặc nhầm s/x, tr/ch...">tooi muon ddi hocj tai TPHCM</textarea>
+            </div>
+
+            <div class="chips-container">
+                <span class="chips-label">Mẫu thử nhanh:</span>
+                <span class="chip" onclick="setQuery('tooi muon ddi hocj')">tooi muon ddi hocj</span>
+                <span class="chip" onclick="setQuery('chia xe kinh nghiem')">chia xe kinh nghiem</span>
+                <span class="chip" onclick="setQuery('uống sửa tươi mô châu')">uống sửa tươi mô châu</span>
+                <span class="chip" onclick="setQuery('ung dung AI va hoc IT')">ung dung AI va hoc IT</span>
+                <span class="chip" onclick="setQuery('sinh song tai TPHCM va lam viec tai UBND')">sinh song tai TPHCM...</span>
+                <span class="chip" onclick="setQuery('cau truyen co tich')">cau truyen co tich</span>
+                <span class="chip" onclick="setQuery('mua dien thoai iPhone 16')">mua dien thoai iPhone 16</span>
+            </div>
+
+            <div class="actions">
+                <button class="btn-primary" onclick="handleRestore()">⚡ Sửa Lỗi Ngay (Restore)</button>
+                <button class="btn-secondary" onclick="handleSuggest()">📋 Xem Top 5 Gợi Ý</button>
+            </div>
+
+            <div id="resultBox" class="result-box">
+                <div class="result-header">
+                    <span class="result-title" id="resultTitle">KẾT QUẢ XỬ LÝ</span>
+                    <span class="latency-pill" id="latencyPill">⚡ 0.00 ms</span>
+                </div>
+                <div class="result-content" id="resultText"></div>
+                <ul id="suggestionsList" class="suggestions-list" style="display: none;"></ul>
+            </div>
+        </div>
+
+        <div class="api-docs">
+            <h3>📌 CÁCH TÍCH HỢP REST API TRỰC TIẾP</h3>
+            <p style="margin-bottom: 8px; color: var(--text-muted);">Gọi POST tới endpoint <code>/api/restore</code>:</p>
+            <pre>curl -X POST http://localhost:5000/api/restore \
+  -H "Content-Type: application/json" \
+  -d '{"query": "tooi muon ddi hocj"}'</pre>
+            <p style="margin: 8px 0; color: var(--text-muted);">Hoặc gọi nhanh qua GET:</p>
+            <pre>curl "http://localhost:5000/api/restore?q=chia+xe+kinh+nghiem"</pre>
+        </div>
+    </div>
+
+    <script>
+        function setQuery(text) {
+            document.getElementById('inputQuery').value = text;
+            handleRestore();
+        }
+
+        async function handleRestore() {
+            const q = document.getElementById('inputQuery').value.trim();
+            if (!q) return;
+
+            const resBox = document.getElementById('resultBox');
+            const resText = document.getElementById('resultText');
+            const sugList = document.getElementById('suggestionsList');
+            const latencyPill = document.getElementById('latencyPill');
+            const resTitle = document.getElementById('resultTitle');
+
+            resTitle.innerText = "KẾT QUẢ ĐÃ CHUẨN HÓA";
+            sugList.style.display = "none";
+            resText.style.display = "block";
+            resText.innerText = "Đang xử lý...";
+            resBox.style.display = "block";
+
+            try {
+                const response = await fetch('/api/restore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: q })
+                });
+                const data = await response.json();
+                resText.innerText = data.result;
+                latencyPill.innerText = `⚡ ${data.latencyMs} ms`;
+            } catch (err) {
+                resText.innerText = "Lỗi khi gọi API: " + err.message;
+            }
+        }
+
+        async function handleSuggest() {
+            const q = document.getElementById('inputQuery').value.trim();
+            if (!q) return;
+
+            const resBox = document.getElementById('resultBox');
+            const resText = document.getElementById('resultText');
+            const sugList = document.getElementById('suggestionsList');
+            const latencyPill = document.getElementById('latencyPill');
+            const resTitle = document.getElementById('resultTitle');
+
+            resTitle.innerText = "TOP 5 GỢI Ý XÁC SUẤT N-GRAM";
+            resText.style.display = "none";
+            sugList.innerHTML = "<li>Đang tải gợi ý...</li>";
+            sugList.style.display = "block";
+            resBox.style.display = "block";
+
+            try {
+                const response = await fetch('/api/suggest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: q, topK: 5 })
+                });
+                const data = await response.json();
+                latencyPill.innerText = `⚡ ${data.latencyMs} ms`;
+
+                sugList.innerHTML = "";
+                data.suggestions.forEach((item, idx) => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<span><strong>${idx + 1}.</strong> ${item.text}</span><span class="score">Score: ${item.score}</span>`;
+                    sugList.appendChild(li);
+                });
+            } catch (err) {
+                sugList.innerHTML = `<li>Lỗi: ${err.message}</li>`;
+            }
+        }
+    </script>
+</body>
+</html>
